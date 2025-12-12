@@ -122,12 +122,16 @@ def fetch_btl_agents_list():
 def parse_inn_from_list_org(name, session, url):
     inns = []
     while True:
-        response = session.get(url, headers=HEADERS, verify=False)
-        if response.status_code != 200:
-            print(f"Появилась капча, перейдите по ссылке {url} и нажмите 'Я не робот'")
-            time.sleep(20)
-            continue
-        break
+        try:
+            response = session.get(url, headers=HEADERS, verify=False)
+            if response.status_code != 200:
+                print(f"Похоже появилась капча, перейдите по ссылке {url} и нажмите 'Я не робот'")
+                time.sleep(20)
+                continue
+            break
+        except requests.exceptions.ConnectionError:
+            print("Похоже сайт заблакировал запросы. Ждем 2 минуты. Также попробуйте посетить https://checko.ru/ для проверки на капчу.")
+            time.sleep(120)
 
     soup = BeautifulSoup(response.text, 'html.parser')
     org_list = soup.find('div', class_='org_list')
@@ -222,12 +226,16 @@ def fetch_btl_agents_info(INNs):
             time.sleep(10)
             print(f"Обрабатываю {i+1} по счёту ИНН")
         while True:
-            url = f'https://checko.ru/search/?query={inn}'
-            response = session.get(url, headers=HEADERS)
-            if response.status_code == 200:
-                break
-            print("Появилась капча. Перейдите по ссылке https://checko.ru/ и нажмите кнопку 'Я не робот'")
-            time.sleep(15)
+            try:
+                url = f'https://checko.ru/search/?query={inn}'
+                response = session.get(url, headers=HEADERS)
+                if response.status_code == 200:
+                    break
+                print("Похоже появилась капча. Перейдите по ссылке https://checko.ru/ и нажмите кнопку 'Я не робот'")
+                time.sleep(15)
+            except requests.exceptions.ConnectionError:
+                print("Похоже сайт заблакировал запросы. Ждем 2 минуты. Также попробуйте посетить https://checko.ru/ для проверки на капчу.")
+                time.sleep(120)
         soup = BeautifulSoup(response.text, 'html.parser')
         if not(soup.find('div', class_='text-success')) or not('Действующая компания' in soup.find('div', class_='text-success').stripped_strings):
             time.sleep(6)
