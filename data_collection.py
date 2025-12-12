@@ -167,7 +167,7 @@ def fetch_btl_agents_INN_and_city(search_result):
     for i, agents_info in enumerate(search_result):
         if (i + 1) % 10 == 0:
             print(f"Проверено {i + 1} компаний")
-            time.sleep(15)
+            time.sleep(20)
 
         article_name = agents_info[0]
         name = agents_info[1]
