@@ -11,6 +11,7 @@ import urllib3
 import os
 from bs4 import BeautifulSoup
 from utils import safe_text, safe_find, safe_find_all, parse_number
+from transliting import smart_translit
 
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -20,6 +21,10 @@ os.makedirs('data/raw', exist_ok=True)
 HEADERS = {
     'User-Agent': 'Mozilla/5.0'
 }
+
+
+def remove_punctuation(text):
+    return re.sub(r'[^\w\s]', ' ', text)
 
 
 def fetch_btl_agents_list():
@@ -119,7 +124,7 @@ def fetch_btl_agents_list():
     return search_result
 
 
-def parse_inn_from_list_org(name, session, url):
+def parse_inn_from_b2b(session, url):
     inns = []
     while True:
         try:
@@ -134,80 +139,56 @@ def parse_inn_from_list_org(name, session, url):
             time.sleep(120)
 
     soup = BeautifulSoup(response.text, 'html.parser')
-    org_list = soup.find('div', class_='org_list')
+    orgs = soup.find_all('div', class_='list-item-info-wrap')
 
-    if not org_list:
+    if not orgs:
         return None
 
-    orgs = org_list.find_all('label')
-    for org in orgs:
-        components = [x.lower() for x in org.stripped_strings]
-        company_name = components[0]
+    for org in orgs[:5]:
+        org_info = org.find('div', 'list-item-info')
+        org_inn_data = org.find('div', 'list-item-right-wrap')
 
-        if '"' in company_name:
-            if not(name.lower() == company_name.split('"')[1]):
-                continue
-        else:
-            if not(name.lower() in company_name):
-                continue
-
-        inn_data = ''
-        for i, component in enumerate(components):
-            if 'инн' in component:
-                inn_data = components[i+1].replace(':', '').split('/')[0].strip()
-
-        if inn_data:
-            inns.append(inn_data)
+        if org_info.find('span', class_='search-highlight'):
+            inn_data_block = org_inn_data.find('span', string='ИНН:')
+            if inn_data_block:
+                inn_data = inn_data_block.parent.text.split(':')[1].strip()
+                if inn_data:
+                    inns.append(inn_data)
 
     return inns
 
 
 def fetch_btl_agents_INN_and_city(search_result):
     """
-        Функция для поиска ИНН агенства через номер телефона, используя сайт https://www.list-org.com/
+        Функция для поиска ИНН агенства через номер телефона, используя сайт https://b2b.house/
     """
     session = requests.Session()
     INNs = set() # Хранит пары (ИНН, город)
     for i, agents_info in enumerate(search_result):
         if (i + 1) % 10 == 0:
+            print('--------------------------')
             print(f"Проверено {i + 1} компаний")
-            time.sleep(20)
+            print(f'Собрано {len(INNs)} ИНН')
+            time.sleep(10)
 
         article_name = agents_info[0]
         name = agents_info[1]
         phones = agents_info[2]
         city = agents_info[3]
 
-        # Пробуем искать по альтернативному названию
+        searching_keys = remove_punctuation(article_name).lower()
         if name:
-            url = f'https://www.list-org.com/search?val={name}&type=name&work=on&okved=58%2C70%2C73'
-            name_result = parse_inn_from_list_org(name, session, url)
-            if name_result:
-                for inn in name_result:
-                    INNs.add((inn, city))
-                    time.sleep(4 + (i % 4))
-                    continue
-
-        # Пробуем искать по названию артикля
-        url = f'https://www.list-org.com/search?val={article_name}&type=name&work=on&okved=58%2C70%2C73'
-        name_result = parse_inn_from_list_org(article_name, session, url)
+            searching_keys = searching_keys + ',' + smart_translit(remove_punctuation(name)).lower()
+        else:
+            searching_keys = searching_keys + ',' + smart_translit(remove_punctuation(article_name)).lower()
+        url = f'https://b2b.house/companies/okved/70/?companyStatus=ACTIVE&keywordSearch={searching_keys}&includedOkveds=70,73&isPrimaryOkveds=1'
+        name_result = parse_inn_from_b2b(session, url)
         if name_result:
             for inn in name_result:
                 INNs.add((inn, city))
-                time.sleep(4 + (i % 4))
+                time.sleep(2)
                 continue
 
-        # Пробуем искать по номеру телефона
-        for phone in phones:
-            url = f'https://www.list-org.com/search?val={phone}&type=phone&work=on&okved=58%2C70%2C73'
-            if name:
-                phone_result = parse_inn_from_list_org(name, session, url)
-            else:
-                phone_result = parse_inn_from_list_org(article_name, session, url)
-            if phone_result:
-                for inn in phone_result:
-                    INNs.add((inn, city))
-            time.sleep(4 + (i % 4))
 
     with open('data/raw/INNs.pickle', 'wb') as f:
         pickle.dump(INNs, f)
@@ -329,7 +310,7 @@ def fetch_btl_agents_info(INNs):
             email
         ])
 
-        time.sleep(8 + (i % 4))
+        time.sleep(3 + (i % 4))
 
     with open('data/raw/output_companies.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
@@ -357,6 +338,7 @@ def data_collection_main():
     agents_list = fetch_btl_agents_list() # 1
     print("[2] Ищем ИНН компаний")
     INNs = fetch_btl_agents_INN_and_city(agents_list) # 2
+    print("Было собрано", len(INNs), "ИНН")
     print("[3] Получаем информацию о компаниях")
     companies_info = fetch_btl_agents_info(INNs) # 3
     print("Сбор данных завершен")

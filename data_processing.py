@@ -11,11 +11,11 @@ def process_companies(file_path):
     """
     companies = pd.read_csv(file_path)
     print("[#] Количество компаний до обработки:", len(companies))
-    companies = companies.dropna(subset=['revenue'])
-    companies['revenue'] = companies['revenue'].astype(int)
-    companies = companies[companies['revenue'] >= 200_000_000]
     int_fills = {'revenue': 0, 'employees': 0}
     companies.fillna(int_fills, inplace=True)
+    companies['revenue'] = companies['revenue'].astype(int)
+    companies['employees'] = companies['employees'].astype(int)
+    companies = companies[companies['revenue'] >= 200_000_000]
     str_fills = {'okved_main': 'Неизвестно', 'site': 'Неизвестно', 'phone': 'Неизвестно', 'email': 'Неизвестно'}
     companies.fillna(str_fills, inplace=True)
     print("[#] Количество компаний после обработки и фильтрации:", len(companies))
