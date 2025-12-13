@@ -22,6 +22,16 @@ HEADERS = {
     'User-Agent': 'Mozilla/5.0'
 }
 
+all20_sources = {
+    'BTL': 'http://www.all20.ru/btl/',
+    'SUVENIR': 'http://www.all20.ru/gifts/',
+    'MERCH': 'http://www.all20.ru/merchandising/'
+}
+sources_okved = {
+    'BTL': ['70', '73'],
+    'SUVENIR': ['18', '22', '32', '47'],
+    'MERCH': ['47', '82']
+}
 
 def remove_punctuation(text):
     return re.sub(r'[^\w\s]', ' ', text)
@@ -29,55 +39,59 @@ def remove_punctuation(text):
 
 def fetch_btl_agents_list():
     """
-        Получаем список российских BTL агенств, входящих в рейтинг РРАР 2025 (название).
+        Получаем список российских BTL агенств, входящих в рейтинг РРАР 2025 разных рубрик.
         Источник: http://www.all20.ru/
     """
-    agents = []
+    agents = {}
     search_result = []
     # Получаем общее количество страниц
-    url = 'http://www.all20.ru/btl/?list=all'
-    response = requests.get(url, headers=HEADERS)
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    if not soup:
-        return set()
-
-    pages = soup.find_all('div', class_='pager')
-    if pages:
-        try:
-            total_pages = int(pages[-1].text.strip())
-        except ValueError:
-            total_pages = 1
-    else:
-        total_pages = 1
-
-
-    for page in range(1, total_pages + 1):
-        url = f'http://www.all20.ru/btl/?list=all&page={page}'
+    for source_type, source_link in all20_sources.items():
+        url = f'{source_link}?list=all'
         response = requests.get(url, headers=HEADERS)
         soup = BeautifulSoup(response.text, 'html.parser')
-        if not soup:
-            continue
 
-        agents_list = soup.find_all('div', class_='ratingname')
-        for agent in agents_list:
-            link = agent.find('a')
-            if not link:
+        if not soup:
+            return set()
+
+        pages = soup.find_all('div', class_='pager')
+        if pages:
+            try:
+                total_pages = int(pages[-1].text.strip())
+            except ValueError:
+                total_pages = 1
+        else:
+            total_pages = 1
+
+
+        for page in range(1, total_pages + 1):
+            url = f'{source_link}?list=all&page={page}'
+            response = requests.get(url, headers=HEADERS)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            if not soup:
                 continue
 
-            article_name = safe_text(link)
-            href = link.get('href')
-            if article_name and href:
-                agents.append((article_name, href))
+            agents_list = soup.find_all('div', class_='ratingname')
+            for agent in agents_list:
+                link = agent.find('a')
+                if not link:
+                    continue
+
+                article_name = safe_text(link)
+                href = link.get('href')
+                if article_name and href:
+                    if article_name in agents:
+                        agents[article_name][1].add(source_type)
+                    else:
+                        agents[article_name] = [href, set([source_type])]
 
     i = 1
-    for agent in agents:
+    for agent_name, agent_data in agents.items():
         if i % 20 == 0:
             print(f"Было спарсено {i} агентов")
             time.sleep(2)
-        article_name, href = agent
+        article_name, href, agent_source = agent_name, agent_data[0], list(agent_data[1])[0]
         name = None
-        url = f'http://www.all20.ru/btl/{href}'
+        url = f'{all20_sources[agent_source]}{href}'
         response = requests.get(url, headers=HEADERS)
         soup = BeautifulSoup(response.text, 'html.parser')
         # Берем город, где расположено агентство
@@ -102,7 +116,7 @@ def fetch_btl_agents_list():
                         right = name.find('»')
                         name = name[left+1:right]
 
-        search_result.append([article_name, name, city])
+        search_result.append([article_name, name, city, list(agent_data[1])])
         i += 1
 
     with open('data/raw/search_result.pickle', 'wb') as f:
@@ -150,7 +164,7 @@ def fetch_btl_agents_INN_and_city(search_result):
         Функция для поиска ИНН агенства через номер телефона, используя сайт https://b2b.house/
     """
     session = requests.Session()
-    INNs = set() # Хранит пары (ИНН, город)
+    INNs = {}
     for i, agents_info in enumerate(search_result):
         if (i + 1) % 10 == 0:
             print('--------------------------')
@@ -161,17 +175,23 @@ def fetch_btl_agents_INN_and_city(search_result):
         article_name = agents_info[0]
         name = agents_info[1]
         city = agents_info[2]
+        sources = agents_info[3]
+
+        including_okveds = []
+        for source in sources:
+            including_okveds += sources_okved[source]
 
         searching_keys = remove_punctuation(article_name).lower()
         if name:
             searching_keys = searching_keys + ',' + smart_translit(remove_punctuation(name)).lower()
         else:
             searching_keys = searching_keys + ',' + smart_translit(remove_punctuation(article_name)).lower()
-        url = f'https://b2b.house/companies/okved/70/?companyStatus=ACTIVE&keywordSearch={searching_keys}&includedOkveds=70,73&isPrimaryOkveds=1'
+        url = f'https://b2b.house/companies/okved/70/?companyStatus=ACTIVE&keywordSearch={searching_keys}&includedOkveds={",".join(including_okveds)}&isPrimaryOkveds=1'
         name_result = parse_inn_from_b2b(session, url)
         if name_result:
             for inn in name_result:
-                INNs.add((inn, city))
+                if not(inn in INNs):
+                    INNs[inn] = [city, sources]
         time.sleep(2)
 
 
@@ -187,10 +207,12 @@ def fetch_btl_agents_info(INNs):
     """
     info = []
     session = requests.Session()
-    for i, (inn, city) in enumerate(INNs):
-        if (i + 1) % 10 == 0:
+    i = 0
+    for inn, (city, sources) in INNs.items():
+        i += 1
+        if i % 10 == 0:
             time.sleep(15)
-            print(f"Обрабатываю {i+1} по счёту ИНН")
+            print(f"Обрабатываю {i} по счёту ИНН")
         while True:
             try:
                 url = f'https://checko.ru/search/?query={inn}'
@@ -277,7 +299,7 @@ def fetch_btl_agents_info(INNs):
                 if idx + 1 < len(parts) and parts[idx + 1] != '—':
                     email = parts[idx + 1].strip()
 
-        segment_tag = "BTL"
+        segment_tag = sources
         source = "checko_custom_parser"
 
         info.append([
@@ -285,7 +307,7 @@ def fetch_btl_agents_info(INNs):
             company_name,
             revenue_year,
             revenue_value,
-            segment_tag,
+            '|'.join(segment_tag),
             source,
             okved_main,
             employees_count,
@@ -321,6 +343,7 @@ def data_collection_main():
     print("Начинаем сбор данных")
     print("[1] Получаем список btl агентов")
     agents_list = fetch_btl_agents_list() # 1
+    print("Было найдено", len(agents_list), "компаний")
     print("[2] Ищем ИНН компаний")
     INNs = fetch_btl_agents_INN_and_city(agents_list) # 2
     print("Было собрано", len(INNs), "ИНН")

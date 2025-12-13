@@ -16,6 +16,7 @@ def process_companies(file_path):
     companies['revenue'] = companies['revenue'].astype(int)
     companies['employees'] = companies['employees'].astype(int)
     companies = companies[companies['revenue'] >= 200_000_000]
+    companies.drop_duplicates(subset=['inn'], keep='first', inplace=True)
     str_fills = {'okved_main': 'Неизвестно', 'site': 'Неизвестно', 'phone': 'Неизвестно', 'email': 'Неизвестно'}
     companies.fillna(str_fills, inplace=True)
     print("[#] Количество компаний после обработки и фильтрации:", len(companies))
