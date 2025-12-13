@@ -29,7 +29,7 @@ def remove_punctuation(text):
 
 def fetch_btl_agents_list():
     """
-        Получаем список российских BTL агенств, входящих в рейтинг РРАР 2025 (название/Телефон).
+        Получаем список российских BTL агенств, входящих в рейтинг РРАР 2025 (название).
         Источник: http://www.all20.ru/
     """
     agents = []
@@ -70,15 +70,11 @@ def fetch_btl_agents_list():
             if article_name and href:
                 agents.append((article_name, href))
 
-    # Парсинг телефонов
-    phone_pattern = re.compile(
-        r'(\+7|7|8)[\s\-]?\(?[0-9]{3}\)?[\s\-]?[0-9]{3}[\s\-]?[0-9]{2}[\s\-]?[0-9]{2}'
-    )
     i = 1
     for agent in agents:
         if i % 20 == 0:
             print(f"Было спарсено {i} агентов")
-            time.sleep(5)
+            time.sleep(2)
         article_name, href = agent
         name = None
         url = f'http://www.all20.ru/btl/{href}'
@@ -106,17 +102,8 @@ def fetch_btl_agents_list():
                         right = name.find('»')
                         name = name[left+1:right]
 
-        # Пытаемся отыскать телефон агенства
-        contacts_block = soup.find('div', id='box')
-        phones = []
-        if contacts_block:
-            for info in contacts_block.stripped_strings:
-                phone = phone_pattern.search(info)
-                if phone:
-                    phones.append(phone.group())
-        search_result.append([article_name, name, phones, city])
+        search_result.append([article_name, name, city])
         i += 1
-        time.sleep(1.5)
 
     with open('data/raw/search_result.pickle', 'wb') as f:
         pickle.dump(search_result, f)
@@ -144,7 +131,7 @@ def parse_inn_from_b2b(session, url):
     if not orgs:
         return None
 
-    for org in orgs[:5]:
+    for org in orgs[:10]:
         org_info = org.find('div', 'list-item-info')
         org_inn_data = org.find('div', 'list-item-right-wrap')
 
@@ -169,12 +156,11 @@ def fetch_btl_agents_INN_and_city(search_result):
             print('--------------------------')
             print(f"Проверено {i + 1} компаний")
             print(f'Собрано {len(INNs)} ИНН')
-            time.sleep(10)
+            time.sleep(5)
 
         article_name = agents_info[0]
         name = agents_info[1]
-        phones = agents_info[2]
-        city = agents_info[3]
+        city = agents_info[2]
 
         searching_keys = remove_punctuation(article_name).lower()
         if name:
@@ -186,8 +172,7 @@ def fetch_btl_agents_INN_and_city(search_result):
         if name_result:
             for inn in name_result:
                 INNs.add((inn, city))
-                time.sleep(2)
-                continue
+        time.sleep(2)
 
 
     with open('data/raw/INNs.pickle', 'wb') as f:
@@ -204,7 +189,7 @@ def fetch_btl_agents_info(INNs):
     session = requests.Session()
     for i, (inn, city) in enumerate(INNs):
         if (i + 1) % 10 == 0:
-            time.sleep(10)
+            time.sleep(15)
             print(f"Обрабатываю {i+1} по счёту ИНН")
         while True:
             try:
@@ -310,7 +295,7 @@ def fetch_btl_agents_info(INNs):
             email
         ])
 
-        time.sleep(3 + (i % 4))
+        time.sleep(4 + (i % 4))
 
     with open('data/raw/output_companies.csv', 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
